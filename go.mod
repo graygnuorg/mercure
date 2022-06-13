@@ -16,6 +16,7 @@ require (
 	github.com/golang/glog v1.0.0 // indirect
 	github.com/gorilla/handlers v1.5.1
 	github.com/gorilla/mux v1.8.0
+	github.com/graygnuorg/go-gdbm v0.0.0-20220414133636-0030728258b6
 	github.com/hashicorp/golang-lru v0.5.4
 	github.com/kevburnsjr/skipfilter v0.0.1
 	github.com/kr/text v0.2.0 // indirect

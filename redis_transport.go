@@ -117,7 +117,7 @@ func (t *RedisTransport) connect(u *url.URL) error {
 //
 // DBNUM is the number of the redis database to use
 //
-// STREAM sets the redis stream name (defaults to "mercure"
+// STREAM sets the redis stream name (defaults to "mercure")
 //
 // The parameters cleanup_interval and event_ttl control periodic database cleanups.  Both take as their
 // argument a duration specification suitable as input to time.ParseDuration.  The cleanup_control parameter
