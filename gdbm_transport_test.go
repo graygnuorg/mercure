@@ -1,7 +1,8 @@
+// +build gdbm
+
 package mercure
 
 import (
-//	"bytes"
 	"encoding/json"
 	"net/url"
 	"os"

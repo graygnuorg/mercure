@@ -1,3 +1,5 @@
+// +build gdbm
+
 package mercure
 
 import (
