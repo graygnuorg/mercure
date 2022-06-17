@@ -19,6 +19,7 @@ require (
 	github.com/hashicorp/golang-lru v0.5.4
 	github.com/kevburnsjr/skipfilter v0.0.1
 	github.com/kr/text v0.2.0 // indirect
+	github.com/lib/pq v1.10.6
 	github.com/mitchellh/mapstructure v1.5.0 // indirect
 	github.com/pelletier/go-toml v1.9.5 // indirect
 	github.com/prometheus/client_golang v1.12.1
