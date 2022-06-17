@@ -49,7 +49,7 @@ func NewPostgresTransport(iu *url.URL, l Logger, tss *TopicSelectorStore) (Trans
 			} else {
 				eventTTL = d
 			}
-		} else if c := l.Check(zap.ErrorLevel, "unparsable redis event TTL"); c != nil {
+		} else if c := l.Check(zap.ErrorLevel, "unparsable postgres event TTL"); c != nil {
 			c.Write(zap.String("event-ttl", s))
 		}
 		q.Del("event_ttl")
@@ -59,14 +59,14 @@ func NewPostgresTransport(iu *url.URL, l Logger, tss *TopicSelectorStore) (Trans
 		d, err := time.ParseDuration(s)
 		if err == nil {
 			cleanupInterval = d
-		} else if c := l.Check(zap.ErrorLevel, "unparsable redis cleanup interval"); c != nil {
+		} else if c := l.Check(zap.ErrorLevel, "unparsable postgres cleanup interval"); c != nil {
 			c.Write(zap.String("cleanup-interval", s))
 		}
 		q.Del("cleanup_interval")
 	}
 	u.RawQuery = q.Encode()
 
-	db, err := sql.Open("postgres", iu.String())
+	db, err := sql.Open("postgres", u.String())
 	if err != nil {
 		return nil, fmt.Errorf("can't parse URL: %w", err)
 	}
@@ -75,14 +75,20 @@ func NewPostgresTransport(iu *url.URL, l Logger, tss *TopicSelectorStore) (Trans
 		return nil, fmt.Errorf("can't connect to the database: %w", err)
 	}
 
-	return &PostgresTransport{
+	transport := &PostgresTransport{
 		subscribers: NewSubscriberList(1e5),
 		logger: l,
 		db: db,
 		closed: make(chan struct{}),
 		eventTTL: eventTTL,
 		cleanupInterval: cleanupInterval,
-	}, nil
+	}
+
+	if transport.cleanupInterval > 0 {
+		go transport.cleanup()
+	}
+
+	return transport, nil
 }
 
 func (t *PostgresTransport) storeUpdate(update *Update) error {
@@ -90,7 +96,7 @@ func (t *PostgresTransport) storeUpdate(update *Update) error {
 	if err != nil {
 		return fmt.Errorf("error marshalling update: %w", err)
 	}
-	if _, err := t.db.Exec("INSERT INTO EVENTS(id,message) values($1,$2)", update.ID, updateJSON); err != nil {
+	if _, err := t.db.Exec("INSERT INTO events (id,message) VALUES($1,$2)", update.ID, updateJSON); err != nil {
 		return fmt.Errorf("error inserting update: %w", err)
 	}
 	return nil
@@ -250,6 +256,54 @@ func (t *PostgresTransport) GetSubscribers() (string, []*Subscriber, error) {
 	return lastEventID, subscribers, err
 }
 
+func (t *PostgresTransport) trim() error {
+	select {
+	case <-t.closed:
+		return ErrClosedTransport
+	default:
+	}
+
+	t.Lock()
+	defer t.Unlock()
+
+	var ts time.Time
+	err := t.db.QueryRow(`SELECT now()`).Scan(&ts)
+	if err == nil {
+		ts = ts.Add(- t.eventTTL)
+		if dbg := t.logger.Check(zap.DebugLevel, "deleting events earlier than"); dbg != nil {
+			dbg.Write(zap.Time("ts", ts))
+		}
+
+		result, err := t.db.Exec("DELETE FROM events WHERE ts < $1",
+			ts.Format(`2006-01-02T15:04:05.999999`))
+
+		if err == nil {
+			if c := t.logger.Check(zap.InfoLevel, "Postgres trim"); c != nil {
+				n, err := result.RowsAffected()
+				if err == nil {
+					c.Write(zap.Int64("Events deleted", n))
+				} else {
+					c.Write(zap.Error(err))
+				}
+			}
+		} else if c := t.logger.Check(zap.ErrorLevel, "Deleting events"); c != nil {
+			c.Write(zap.Error(err))
+		}
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("can't get recent timestamp: %w", err)
+	}
+	return nil
+}
+
+func (t *PostgresTransport) cleanup() {
+	if c := t.logger.Check(zap.DebugLevel, "Postgres cleanup"); c != nil {
+		c.Write(zap.Duration("cleanupInterval", t.cleanupInterval),
+			zap.Duration("envenTTL", t.eventTTL))
+	}
+	for t.trim() == nil {
+		time.Sleep(t.cleanupInterval)
+	}
+}
 
 // Interface guards.
 var (
