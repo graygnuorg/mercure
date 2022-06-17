@@ -1,7 +1,6 @@
 package mercure
 
 import (
-	"context"
 	"database/sql"
 	"net/url"
 	"time"
@@ -23,7 +22,6 @@ type PostgresTransport struct {
 	subscribers     *SubscriberList
 	logger		Logger
 	db		*sql.DB
-	ctx		context.Context
 	closed          chan struct{}
 	closedOnce      sync.Once
 	eventTTL	time.Duration
@@ -72,8 +70,8 @@ func NewPostgresTransport(iu *url.URL, l Logger, tss *TopicSelectorStore) (Trans
 	if err != nil {
 		return nil, fmt.Errorf("can't parse URL: %w", err)
 	}
-	ctx := context.TODO()
-	if err := db.PingContext(ctx); err != nil {
+
+	if err := db.Ping(); err != nil {
 		return nil, fmt.Errorf("can't connect to the database: %w", err)
 	}
 
@@ -81,7 +79,6 @@ func NewPostgresTransport(iu *url.URL, l Logger, tss *TopicSelectorStore) (Trans
 		subscribers: NewSubscriberList(1e5),
 		logger: l,
 		db: db,
-		ctx: ctx,
 		closed: make(chan struct{}),
 		eventTTL: eventTTL,
 		cleanupInterval: cleanupInterval,
@@ -93,7 +90,7 @@ func (t *PostgresTransport) storeUpdate(update *Update) error {
 	if err != nil {
 		return fmt.Errorf("error marshalling update: %w", err)
 	}
-	if _, err := t.db.ExecContext(t.ctx, "INSERT INTO EVENTS(id,message) values($1,$2)", update.ID, updateJSON); err != nil {
+	if _, err := t.db.Exec("INSERT INTO EVENTS(id,message) values($1,$2)", update.ID, updateJSON); err != nil {
 		return fmt.Errorf("error inserting update: %w", err)
 	}
 	return nil
@@ -123,16 +120,14 @@ func (t *PostgresTransport) Dispatch(update *Update) error {
 
 func (t *PostgresTransport) dispatchHistory(s *Subscriber) error {
 	var ts time.Time
-	err := t.db.QueryRowContext(t.ctx, `SELECT ts from events where id = $1`, s.RequestLastEventID).Scan(&ts)
+	err := t.db.QueryRow(`SELECT ts from events where id = $1`, s.RequestLastEventID).Scan(&ts)
 
 	var rows *sql.Rows
 	if err == nil {
-		rows, err = t.db.QueryContext(t.ctx,
-			`SELECT message FROM events WHERE ts > $1 ORDER BY ts`,
+		rows, err = t.db.Query(`SELECT message FROM events WHERE ts > $1 ORDER BY ts`,
 			ts.Format(`2006-01-02T15:04:05.999999`))
 	} else if errors.Is(err, sql.ErrNoRows) {
-		rows, err = t.db.QueryContext(t.ctx,
-			`SELECT message FROM events ORDER BY ts`)
+		rows, err = t.db.Query(`SELECT message FROM events ORDER BY ts`)
 	} else {
 		return fmt.Errorf("Error getting timestamp: %w", err)
 	}
@@ -233,7 +228,7 @@ func (t *PostgresTransport) Close() (err error) {
 }
 
 func (t *PostgresTransport) lastEventID() (result string, err error) {
-	err = t.db.QueryRowContext(t.ctx, `SELECT e1.id FROM events e1 INNER JOIN (SELECT MAX(ts) ts FROM events) e2 ON e1.ts = e2.ts`).Scan(&result)
+	err = t.db.QueryRow(`SELECT e1.id FROM events e1 INNER JOIN (SELECT MAX(ts) ts FROM events) e2 ON e1.ts = e2.ts`).Scan(&result)
 	if err != nil && errors.Is(err, sql.ErrNoRows) {
 		result = EarliestLastEventID
 	}
